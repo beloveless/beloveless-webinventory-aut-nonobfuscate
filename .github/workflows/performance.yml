@@ -1,0 +1,68 @@
+name: Performance Testing with Selenium 
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    name: Functional Test
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+
+      - name: Create isolated network
+        run: docker network create --driver bridge isolated      
+
+      - name: Build AUT
+        run: docker build -t my-php-site:latest .
+
+      - name: Run AUT using docker-compose
+        run: docker-compose up -d
+
+      - name: Get AUT URL
+        run: |
+          URL=$(ip -f inet -o addr show docker0 | awk '{print $4}' | cut -d '/' -f 1)
+          echo "URL=$URL" >> $GITHUB_ENV
+
+      - name: Wait for MySQL to be ready
+        run: |
+          until nc -zv ${{ env.URL }} 3306; do echo "Waiting for MySQL to be ready..."; sleep 5; done
+
+      - name: Check AUT URL
+        run: |
+          curl -L http://${{ env.URL }}/index-test.php
+
+      - name: Check Server Availability
+        run: |
+          if ! nc -zv ${{ env.URL }} 80; then
+            echo "Server is not available."
+            exit 1
+          fi
+      
+      - name: Selenium Preparation
+        run: docker run --network=isolated -d -p 4444:4444 -p 7900:7900 -v /dev/shm:/dev/shm --name firefox-standalone selenium/standalone-firefox:latest
+
+      - name: Wait for Selenium Hub
+        run: |
+          until curl --output /dev/null --silent --head --fail http://localhost:4444; do
+            echo "waiting for selenium hub to be started"
+            sleep 1
+          done      
+
+      - name: Check the Hub
+        run: curl http://localhost:4444/ui
+
+      - name: Install Selenium client
+        run: pip install -U selenium pytest pytest-xdist
+
+      - name: Check AUT
+        run: curl -L http://${{ env.URL }}
+
+      - name: Run tests using pytest
+        run: |
+          pytest -v tests/
+
+      - name: stop docker
+        run: docker stop docker-apache
