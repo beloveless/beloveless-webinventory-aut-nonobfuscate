@@ -64,5 +64,12 @@ jobs:
         run: |
           pytest -v tests/
 
+      - name: Upload screenshots
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: screenshots
+          path: screenshots/
+
       - name: stop docker
         run: docker stop docker-apache
